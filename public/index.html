@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multiplayer Τρίλιζα & Chat</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="game-container">
+        <h1>Multiplayer Τρίλιζα</h1>
+        <div id="status">Σύνδεση στον server...</div>
+        
+        <div id="board" class="board hidden">
+            <div class="cell" data-index="0"></div>
+            <div class="cell" data-index="1"></div>
+            <div class="cell" data-index="2"></div>
+            <div class="cell" data-index="3"></div>
+            <div class="cell" data-index="4"></div>
+            <div class="cell" data-index="5"></div>
+            <div class="cell" data-index="6"></div>
+            <div class="cell" data-index="7"></div>
+            <div class="cell" data-index="8"></div>
+        </div>
+
+        <div id="chat-box" class="chat-container hidden">
+            <div id="messages"></div>
+            <div class="chat-input-area">
+                <input type="text" id="chat-input" placeholder="Πες κάτι στον αντίπαλο..." autocomplete="off">
+                <button id="send-btn">Στείλε</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        let mySymbol = null;
+        let isMyTurn = false;
+        let currentRoom = null;
+        let gameActive = false;
+
+        const statusDiv = document.getElementById('status');
+        const boardDiv = document.getElementById('board');
+        const cells = document.querySelectorAll('.cell');
+
+        const chatBox = document.getElementById('chat-box');
+        const messagesDiv = document.getElementById('messages');
+        const chatInput = document.getElementById('chat-input');
+        const sendBtn = document.getElementById('send-btn');
+
+        socket.on('waiting', (msg) => {
+            statusDiv.textContent = msg;
+        });
+
+        socket.on('gameStart', ({ room, symbol, myTurn }) => {
+            currentRoom = room;
+            mySymbol = symbol;
+            isMyTurn = myTurn;
+            gameActive = true;
+            
+            boardDiv.classList.remove('hidden');
+            boardDiv.classList.remove('disabled');
+            chatBox.classList.remove('hidden');
+            
+            cells.forEach(cell => {
+                cell.textContent = '';
+                cell.className = 'cell'; // Επαναφέρει την αρχική κλάση σβήνοντας τα taken, x-symbol, o-symbol
+            });
+
+            updateStatus();
+        });
+
+        socket.on('moveMade', ({ board, turn }) => {
+            board.forEach((val, idx) => {
+                cells[idx].textContent = val;
+                if (val) {
+                    cells[idx].classList.add('taken');
+                    // Προσθήκη κλάσης για το χρώμα ανάλογα με το σύμβολο
+                    if (val === 'X') {
+                        cells[idx].classList.add('x-symbol');
+                    } else if (val === 'O') {
+                        cells[idx].classList.add('o-symbol');
+                    }
+                }
+            });
+
+            isMyTurn = (turn === socket.id);
+            
+            if (!checkWinner(board)) {
+                updateStatus();
+            }
+        });
+
+        socket.on('receiveMessage', ({ sender, text }) => {
+            const msgElem = document.createElement('div');
+            msgElem.className = 'chat-message';
+            
+            const nameColor = sender === 'X' ? '#00adb5' : '#ff2e63';
+            
+            msgElem.innerHTML = `<span style="color: ${nameColor}; font-weight: bold;">[${sender}]</span>: ${text}`;
+            messagesDiv.appendChild(msgElem);
+            
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        });
+
+        socket.on('opponentLeft', () => {
+            statusDiv.textContent = "Ο αντίπαλος αποσυνδέθηκε από το παιχνίδι.";
+            boardDiv.classList.add('disabled');
+            gameActive = false;
+        });
+
+
+        cells.forEach(cell => {
+            cell.addEventListener('click', () => {
+                const index = cell.getAttribute('data-index');
+                if (isMyTurn && !cell.textContent && gameActive) {
+                    socket.emit('makeMove', { room: currentRoom, index: parseInt(index) });
+                }
+            });
+        });
+
+        sendBtn.addEventListener('click', sendMessage);
+
+        chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        function sendMessage() {
+            const msg = chatInput.value.trim();
+            if (msg && currentRoom) {
+                socket.emit('sendMessage', { room: currentRoom, message: msg });
+                chatInput.value = '';
+            }
+        }
+
+        function updateStatus() {
+            statusDiv.textContent = isMyTurn ? `Δική σου σειρά (${mySymbol})` : "Σειρά του αντιπάλου...";
+        }
+
+        function checkWinner(board) {
+            const lines = [
+                [0,1,2], [3,4,5], [6,7,8], // Οριζόντια
+                [0,3,6], [1,4,7], [2,5,8], // Κάθετα
+                [0,4,8], [2,4,6]           // Διαγώνια
+            ];
+            
+            for (let line of lines) {
+                const [a, b, c] = line;
+                if (board[a] && board[a] === board[b] && board[a] === board[c]) {
+                    gameActive = false;
+                    boardDiv.classList.add('disabled');
+                    if (board[a] === mySymbol) {
+                        statusDiv.textContent = "Νίκησες! 🎉";
+                    } else {
+                        statusDiv.textContent = "Έχασες... 😢";
+                    }
+                    return true;
+                }
+            }
+            
+            if (!board.includes(null)) {
+                gameActive = false;
+                boardDiv.classList.add('disabled');
+                statusDiv.textContent = "Ισοπαλία! 🤝";
+                return true;
+            }
+            
+            return false;
+        }
+    </script>
+</body>
+</html>
